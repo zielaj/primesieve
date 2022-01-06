@@ -144,12 +144,12 @@ const std::array<uint8_t, 7*11*13> buffer_7_11_13 =
 };
 
 /// Pre-sieve with the primes <= 59
-const std::array<std::vector<uint64_t>, 4> bufferPrimes =
+const std::array<std::array<uint64_t, 4>, 4> bufferPrimes =
 {{
   {  7, 19, 23, 29 }, // 89 KiB
   { 11, 13, 17, 37 }, // 90 KiB
-  { 31, 47, 59 },     // 86 KiB
-  { 41, 43, 53 }      // 93 KiB
+  {  1, 31, 47, 59 }, // 86 KiB
+  {  1, 41, 43, 53 }  // 93 KiB
 }};
 
 void andBuffers(const uint8_t* buf1,
@@ -221,7 +221,8 @@ void PreSieve::initBuffers()
     eratSmall.init(stop, buffers_[i].size(), maxPrime);
 
     for (uint64_t prime : bufferPrimes[i])
-      eratSmall.addSievingPrime(prime, start);
+      if (prime > 1)
+        eratSmall.addSievingPrime(prime, start);
     eratSmall.crossOff(buffers_[i].data(), buffers_[i].size());
   }
 }
