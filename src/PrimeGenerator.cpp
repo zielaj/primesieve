@@ -310,8 +310,8 @@ void PrimeGenerator::fill(std::vector<uint64_t>& primes,
       // This 64-bit read is usually misaligned. On some
       // architectures, this may be slower, or even result in a
       // failure.
-      const uint64_t nextBits = littleendian_cast<uint64_t>(&sieve[sieveIdx + 8]);
-      int trailingZeros = 63;
+      uint64_t nextBits = littleendian_cast<uint64_t>(&sieve[sieveIdx + 8]) << 8;
+      int trailingZeros = 56;
 
       if_unlikely (!bits) goto zero;
       primes[i++] = nextPrime(bits, low);
@@ -338,23 +338,23 @@ void PrimeGenerator::fill(std::vector<uint64_t>& primes,
       bits &= bits - 1;
 
       if_unlikely (!bits) goto zero;
-      // If nextPrime is implemented using ctz, then trailingZeros has
-      // already been computed above, so this call to ctz is free. On
-      // other architectures, it's not but we could modify nextPrime
-      // so that we could reuse its computation here as well.
-      trailingZeros = __builtin_ctzll(bits);
-      primes[i++] = nextPrime(bits, low);
-      bits &= bits - 1;
-
+      // WARNING: here we use CTZ, which may be slow.
+      trailingZeros = __builtin_ctzll(bits) & ~7;
+      {
+        uint64_t old_bits = bits;
+        bits &= bits - 1;
+        // We shift the 128 bits [nextBits | bits] left by an integral
+        // number of bytes without losing any 1s. Then we update
+        // sieveIdx and low accordingly. We already pre-shifted
+        // nextBits by 8, so that the maximum shift below is 56 and
+        // not 64 (shifting by 64 is a no-op).
+        nextBits <<= (56 - trailingZeros);
+        bits >>= trailingZeros;
+        primes[i++] = nextPrime(old_bits, low);
+      }
     zero:
-      // We shift the 128 bits [nextBits | bits] left by an integral
-      // number of bytes without losing any 1s. Then we update
-      // sieveIdx and low accordingly.
+      bits |= nextBits;
       int shift = trailingZeros >> 3;
-      bits >>= (shift * 8);
-      // We don't do '<< (64 - shift*8)' because that doesn't work if
-      // shift == 0, because '<< 64' is actually a no-op.
-      bits |= (nextBits << 8 << (56 - shift*8));
       sieveIdx += shift;
       low += shift  * 30;
     }
