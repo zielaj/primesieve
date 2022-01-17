@@ -301,22 +301,75 @@ void PrimeGenerator::fill(std::vector<uint64_t>& primes,
     uint64_t sieveIdx = sieveIdx_;
     uint64_t sieveSize = sieveSize_;
 
-    // Fill the buffer with at least (maxSize - 64) primes.
-    // Each loop iteration can generate up to 64 primes
-    // so we have to stop generating primes once there is
-    // not enough space for 64 more primes.
-    do
+    // Fill the buffer with at least (maxSize - 64) primes. Most
+    // iterations of the loop below produce 7 primes without any
+    // branch mispredictions.
+    uint64_t bits = littleendian_cast<uint64_t>(&sieve[sieveIdx]);
+    while (i <= maxSize - 64 && sieveIdx < sieveSize - 8)
     {
-      uint64_t bits = littleendian_cast<uint64_t>(&sieve[sieveIdx]);
+      // This 64-bit read is usually misaligned. On some
+      // architectures, this may be slower, or even result in a
+      // failure.
+      const uint64_t nextBits = littleendian_cast<uint64_t>(&sieve[sieveIdx + 8]);
+      int trailingZeros = 63;
 
-      for (; bits != 0; bits &= bits - 1)
-        primes[i++] = nextPrime(bits, low);
+      if_unlikely (!bits) goto zero;
+      primes[i++] = nextPrime(bits, low);
+      bits &= bits - 1;
 
-      low += 8 * 30;
-      sieveIdx += 8;
+      if_unlikely (!bits) goto zero;
+      primes[i++] = nextPrime(bits, low);
+      bits &= bits - 1;
+
+      if_unlikely (!bits) goto zero;
+      primes[i++] = nextPrime(bits, low);
+      bits &= bits - 1;
+
+      if_unlikely (!bits) goto zero;
+      primes[i++] = nextPrime(bits, low);
+      bits &= bits - 1;
+
+      if_unlikely (!bits) goto zero;
+      primes[i++] = nextPrime(bits, low);
+      bits &= bits - 1;
+
+      if_unlikely (!bits) goto zero;
+      primes[i++] = nextPrime(bits, low);
+      bits &= bits - 1;
+
+      if_unlikely (!bits) goto zero;
+      // If nextPrime is implemented using ctz, then trailingZeros has
+      // already been computed above, so this call to ctz is free. On
+      // other architectures, it's not but we could modify nextPrime
+      // so that we could reuse its computation here as well.
+      trailingZeros = __builtin_ctzll(bits);
+      primes[i++] = nextPrime(bits, low);
+      bits &= bits - 1;
+
+    zero:
+      // We shift the 128 bits [nextBits | bits] left by an integral
+      // number of bytes without losing any 1s. Then we update
+      // sieveIdx and low accordingly.
+      int shift = trailingZeros >> 3;
+      bits >>= (shift * 8);
+      // We don't do '<< (64 - shift*8)' because that doesn't work if
+      // shift == 0, because '<< 64' is actually a no-op.
+      bits |= (nextBits << 8 << (56 - shift*8));
+      sieveIdx += shift;
+      low += shift  * 30;
     }
-    while (i <= maxSize - 64 &&
-           sieveIdx < sieveSize);
+
+    // We may still have a few bytes left to process, we do it here.
+    {
+      uint64_t validBytes = std::min(uint64_t(8), sieveSize - sieveIdx);
+      bits &= (~0ull) >> (64 - 8 * validBytes);
+
+      for (; bits != 0; bits &= bits - 1) {
+        primes[i++] = nextPrime(bits, low);
+      }
+      sieveIdx += validBytes;
+      low += 30 * validBytes;
+    }
 
     low_ = low;
     sieveIdx_ = sieveIdx;
